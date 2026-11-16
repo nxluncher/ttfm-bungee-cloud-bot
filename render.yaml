@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: ttfm-bungee-signal-bot
+    env: python
+    plan: free
+    buildCommand: "pip install --upgrade pip"
+    startCommand: "python cloud_bot/cloud_ttfm_bot.py"
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        value: "9187912205:AAFJJ3Kpi27NF7oS-dNhucbPMb1g9LCPhk8"
+      - key: TELEGRAM_CHAT_ID
+        value: "1724558159"
