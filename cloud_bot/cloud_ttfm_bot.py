@@ -196,7 +196,8 @@ def get_xau_daily_bias():
 
 def format_bungee_line(balance, entry_price, sl_dist, sym):
     risk_usd = balance * (RISK_PCT_NORMAL / 100.0)
-    eff_sl = sl_dist * SLIPPAGE_CUSHION
+    fee_per_unit = entry_price * 0.00035  # Bungee 3 bps RT taker + kayma payı (Claude Formülü)
+    eff_sl = (sl_dist + fee_per_unit) * SLIPPAGE_CUSHION
     units = risk_usd / eff_sl if eff_sl > 0 else 0.0
     notional = units * entry_price
     max_notional = balance * 10.0 * 0.95
@@ -204,7 +205,7 @@ def format_bungee_line(balance, entry_price, sl_dist, sym):
     if notional > max_notional:
         notional = max_notional
         units = notional / entry_price
-        risk_usd = units * sl_dist
+        risk_usd = units * (sl_dist + fee_per_unit)
         capped = True
     eff_lev = notional / balance
     if sym == "BTCUSD":
@@ -380,7 +381,8 @@ def manage_symbol_tick(sym, bars, period_sec):
     state["last_bar_ts"][sym] = curr_bar["time"]
     save_state()
 
-    if state["daily_locked"] or sym in state["open_positions"] or sym in state["pending_orders"]:
+    # Claude Kritik B: Hesap genelinde TEK AÇIK RİSK kuralı (BTC ve XAU aynı anda açık kalamaz!)
+    if state["daily_locked"] or len(state["open_positions"]) > 0 or len(state["pending_orders"]) > 0:
         return
 
     now_utc = datetime.now(timezone.utc)
@@ -395,6 +397,7 @@ def manage_symbol_tick(sym, bars, period_sec):
         target_rr = 2.00
         trig_r, lock_r = 1.00, 0.25
         bias = 0
+        min_sl_pct = 0.25  # Claude: BTC komisyon erozyonuna karşı %0.25 minimum SL
     else:
         if weekday in (5, 6) or not (8 <= srv_hour < 13):
             return
@@ -404,6 +407,7 @@ def manage_symbol_tick(sym, bars, period_sec):
         target_rr = 1.95
         trig_r, lock_r = 1.30, 0.55
         bias = get_xau_daily_bias()
+        min_sl_pct = 0.15
 
     atr = compute_atr(bars, 14)
     c2 = bars[-2]
@@ -429,7 +433,7 @@ def manage_symbol_tick(sym, bars, period_sec):
             if entry >= curr_price:
                 entry = round(curr_price - 0.10, 2)
             risk_dist = entry - sl
-            min_req = max(atr * 0.25, entry * (MIN_SL_PCT / 100.0))
+            min_req = max(atr * 0.25, entry * (min_sl_pct / 100.0))
             if risk_dist >= min_req and risk_dist > 0:
                 tp = round(entry + risk_dist * target_rr, 2)
                 lock_trig = round(entry + risk_dist * trig_r, 2)
@@ -437,6 +441,7 @@ def manage_symbol_tick(sym, bars, period_sec):
                 b10k = format_bungee_line(10000.0, entry, risk_dist, sym)
                 b25k = format_bungee_line(25000.0, entry, risk_dist, sym)
                 tf_str = "PERIOD_H1" if sym == "BTCUSD" else "PERIOD_M15"
+                part_pct = 35 if sym == "BTCUSD" else 50
                 state["pending_orders"][sym] = {
                     "side": "BUY", "entry": entry, "sl": sl, "tp": tp,
                     "lock_trig": lock_trig, "lock_sl": lock_sl,
@@ -450,9 +455,11 @@ def manage_symbol_tick(sym, bars, period_sec):
                     f"🛑 Stop Loss: {sl:.2f}\n"
                     f"💰 Take Profit ({target_rr:.2f}R): {tp:.2f}\n"
                     f"🛡️ Kâr Kilidi (+{trig_r:.1f}R @ {lock_trig:.2f}): SL -> {lock_sl:.2f} (+{lock_r:.2f}R)\n"
+                    f"✂️ Kısmi Kapanış: +{trig_r:.1f}R seviyesinde %{part_pct} Reduce-Only Limit Gir!\n"
+                    f"📝 Bungee Emir Tipi: Bracket Limit (Giriş, SL ve TP tek seferde gir)\n"
                     f"⚡ Bungee 10K: {b10k}\n"
                     f"⚡ Bungee 25K: {b25k}\n"
-                    f"⏳ Geçerlilik: 2 Mum (C3-C4'te dolmazsa sil!)"
+                    f"⏳ Geçerlilik: 2 Mum (C3-C4'te dolmazsa derhal sil!)"
                 )
 
     elif allow_sell and c2["high"] > c1_high and c2["close"] < c1_high and c2["close"] < c2["open"]:
@@ -465,7 +472,7 @@ def manage_symbol_tick(sym, bars, period_sec):
             if entry <= curr_price:
                 entry = round(curr_price + 0.10, 2)
             risk_dist = sl - entry
-            min_req = max(atr * 0.25, entry * (MIN_SL_PCT / 100.0))
+            min_req = max(atr * 0.25, entry * (min_sl_pct / 100.0))
             if risk_dist >= min_req and risk_dist > 0:
                 tp = round(entry - risk_dist * target_rr, 2)
                 lock_trig = round(entry - risk_dist * trig_r, 2)
@@ -473,6 +480,7 @@ def manage_symbol_tick(sym, bars, period_sec):
                 b10k = format_bungee_line(10000.0, entry, risk_dist, sym)
                 b25k = format_bungee_line(25000.0, entry, risk_dist, sym)
                 tf_str = "PERIOD_H1" if sym == "BTCUSD" else "PERIOD_M15"
+                part_pct = 35 if sym == "BTCUSD" else 50
                 state["pending_orders"][sym] = {
                     "side": "SELL", "entry": entry, "sl": sl, "tp": tp,
                     "lock_trig": lock_trig, "lock_sl": lock_sl,
@@ -486,9 +494,11 @@ def manage_symbol_tick(sym, bars, period_sec):
                     f"🛑 Stop Loss: {sl:.2f}\n"
                     f"💰 Take Profit ({target_rr:.2f}R): {tp:.2f}\n"
                     f"🛡️ Kâr Kilidi (+{trig_r:.1f}R @ {lock_trig:.2f}): SL -> {lock_sl:.2f} (+{lock_r:.2f}R)\n"
+                    f"✂️ Kısmi Kapanış: +{trig_r:.1f}R seviyesinde %{part_pct} Reduce-Only Limit Gir!\n"
+                    f"📝 Bungee Emir Tipi: Bracket Limit (Giriş, SL ve TP tek seferde gir)\n"
                     f"⚡ Bungee 10K: {b10k}\n"
                     f"⚡ Bungee 25K: {b25k}\n"
-                    f"⏳ Geçerlilik: 2 Mum (C3-C4'te dolmazsa sil!)"
+                    f"⏳ Geçerlilik: 2 Mum (C3-C4'te dolmazsa derhal sil!)"
                 )
 
 
