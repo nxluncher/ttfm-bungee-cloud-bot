@@ -31,7 +31,7 @@ if not BOT_TOKEN or not CHAT_ID:
 SWING_BARS = 5
 MIN_SL_PCT = 0.15       # %0.15 minimum stop mesafesi (Bungee 3 bps komisyon koruması)
 SLIPPAGE_CUSHION = 1.10 # Lot boyutlandırma kayma tamponu (SL * 1.10)
-RISK_PCT_NORMAL = 1.35  # %1.35 baz risk
+RISK_PCT_NORMAL = 1.20  # %1.20 baz risk (Komisyon sonrası tam %1.30 stop / toparlanma dengeli)
 
 state = {
     "last_bar_ts": {"BTCUSD": 0, "XAUUSD": 0},
