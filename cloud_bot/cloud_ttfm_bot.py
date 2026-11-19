@@ -397,7 +397,7 @@ def manage_symbol_tick(sym, bars, period_sec):
         target_rr = 2.00
         trig_r, lock_r = 1.00, 0.25
         bias = 0
-        min_sl_pct = 0.25  # Claude: BTC komisyon erozyonuna karşı %0.25 minimum SL
+        min_sl_pct = 0.15  # 6 Aylık Backtest Şampiyonu: %0.15 (Hedefe 5. ayda ulaştı, 26 işlemde 18 kârlı)
     else:
         if weekday in (5, 6) or not (8 <= srv_hour < 13):
             return
